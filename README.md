@@ -82,3 +82,8 @@ npm start
 - Heatmap and priority zones require additional Python packages (folium, scikit-learn)
 - The application gracefully degrades if optional packages are not installed
 - Detection algorithm uses OpenCV image processing for blob detection
+
+## Commit change reasons
+
+- Commit 1:
+  A basic framework is made and the basse modal is created
