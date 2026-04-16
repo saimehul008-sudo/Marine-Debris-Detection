@@ -58,6 +58,7 @@ def index():
 
                 detections = []
                 detection_coords = []
+                debris_type_counts = {}
 
                 height, width = image_np.shape[:2]
 
@@ -71,8 +72,12 @@ def index():
                         pixel_lat = lat - (y / height) * 0.01  # Rough approximation
                         pixel_lng = lng + (x / width) * 0.01   # Rough approximation
 
+                        debris_type = classify_debris(area, w, h)
+                        debris_type_counts[debris_type] = debris_type_counts.get(debris_type, 0) + 1
+
                         detections.append({
                             "class": "potential_debris",
+                            "type": debris_type,
                             "confidence": 0.75,
                             "bbox": [x, y, x + w, y + h],
                             "latitude": pixel_lat,
@@ -97,6 +102,7 @@ def index():
                 results = {
                     "total_detections": len(detections),
                     "detections": detections,
+                    "types_found": debris_type_counts,
                     "map": f"Detected {len(detections)} debris items in area centered at {lat}, {lng}",
                     "actionable_report": f"Detected {len(detections)} potential debris items. {len(priority_zones) if priority_zones else 0} priority zones identified for cleanup.",
                     "heatmap_available": heatmap_html is not None,
@@ -106,6 +112,20 @@ def index():
                 error = f"Unable to process the image: {exc}"
 
     return render_template("index.html", results=results, error=error, heatmap_html=heatmap_html, priority_zones=priority_zones)
+
+def classify_debris(area, width, height):
+    """Classify debris into a rough type based on size and shape."""
+    aspect_ratio = width / height if height > 0 else 1
+    if area > 2000 and aspect_ratio > 1.5:
+        return "plastic_container"
+    if area > 1500 and aspect_ratio < 0.6:
+        return "fishing_net"
+    if area > 800:
+        return "wood_fragment"
+    if area > 300:
+        return "plastic_fragment"
+    return "general_debris"
+
 
 def generate_heatmap(detection_coords, center_lat, center_lng, zoom):
     """Generate a folium heatmap with debris concentration overlay"""
@@ -205,6 +225,7 @@ def export_geojson():
                 geometry=geojson.Point((detection["longitude"], detection["latitude"])),
                 properties={
                     "class": detection.get("class", "debris"),
+                    "type": detection.get("type", "unknown"),
                     "confidence": detection.get("confidence", 0.0),
                     "area": detection.get("area", 0),
                     "bbox": detection.get("bbox", [])

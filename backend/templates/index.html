@@ -47,6 +47,13 @@
         <p><strong>Total Detections:</strong> {{ results.total_detections }}</p>
         <p><strong>Actionable Report:</strong> {{ results.actionable_report }}</p>
         <p><strong>Map Summary:</strong> {{ results.map }}</p>
+        {% if results.types_found %}
+        <p><strong>Debris Types Found:</strong>
+          {% for debris_type, count in results.types_found.items() %}
+            {{ debris_type.replace('_', ' ') }} ({{ count }}){% if not loop.last %}, {% endif %}
+          {% endfor %}
+        </p>
+        {% endif %}
 
         {% if results.heatmap_available %}
         <div class="export-section">
@@ -87,6 +94,7 @@
               <tr>
                 <th>#</th>
                 <th>Class</th>
+                <th>Type</th>
                 <th>Confidence</th>
                 <th>Bounding Box</th>
                 <th>Latitude</th>
@@ -98,6 +106,7 @@
               <tr>
                 <td>{{ loop.index }}</td>
                 <td>{{ detection.class }}</td>
+                <td>{{ detection.type.replace('_', ' ') if detection.type else 'unknown' }}</td>
                 <td>{{ "%.2f" | format(detection.confidence) }}</td>
                 <td>{{ detection.bbox }}</td>
                 <td>{{ "%.6f" | format(detection.latitude) }}</td>
