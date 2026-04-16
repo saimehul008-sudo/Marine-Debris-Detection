@@ -26,11 +26,11 @@
         <div class="form-row">
           <div class="form-group">
             <label for="latitude">Latitude</label>
-            <input type="number" id="latitude" name="latitude" step="0.000001" placeholder="e.g., 37.7749" required />
+            <input type="number" id="latitude" name="latitude" step="0.000001" placeholder="e.g., 37.7749 (optional if image has GPS)" />
           </div>
           <div class="form-group">
             <label for="longitude">Longitude</label>
-            <input type="number" id="longitude" name="longitude" step="0.000001" placeholder="e.g., -122.4194" required />
+            <input type="number" id="longitude" name="longitude" step="0.000001" placeholder="e.g., -122.4194 (optional if image has GPS)" />
           </div>
           <div class="form-group">
             <label for="zoom">Map Zoom Level</label>
@@ -47,12 +47,25 @@
         <p><strong>Total Detections:</strong> {{ results.total_detections }}</p>
         <p><strong>Actionable Report:</strong> {{ results.actionable_report }}</p>
         <p><strong>Map Summary:</strong> {{ results.map }}</p>
+        <p><strong>Coordinates Source:</strong> {{ results.coordinate_source.replace('_', ' ') }}</p>
+        <p><strong>Coordinates Used:</strong> {{ "%.6f"|format(results.coordinates_used.latitude) }}, {{ "%.6f"|format(results.coordinates_used.longitude) }}</p>
         {% if results.types_found %}
         <p><strong>Debris Types Found:</strong>
           {% for debris_type, count in results.types_found.items() %}
             {{ debris_type.replace('_', ' ') }} ({{ count }}){% if not loop.last %}, {% endif %}
           {% endfor %}
         </p>
+        {% endif %}
+
+        {% if results.removal_guidance %}
+        <section class="removal-guidance">
+          <h3>Removal Solutions</h3>
+          <ul>
+            {% for debris_type, guidance in results.removal_guidance.items() %}
+            <li><strong>{{ debris_type.replace('_', ' ') }}:</strong> {{ guidance }}</li>
+            {% endfor %}
+          </ul>
+        </section>
         {% endif %}
 
         {% if results.heatmap_available %}
@@ -99,6 +112,7 @@
                 <th>Bounding Box</th>
                 <th>Latitude</th>
                 <th>Longitude</th>
+                <th>Removal Tip</th>
               </tr>
             </thead>
             <tbody>
@@ -111,6 +125,7 @@
                 <td>{{ detection.bbox }}</td>
                 <td>{{ "%.6f" | format(detection.latitude) }}</td>
                 <td>{{ "%.6f" | format(detection.longitude) }}</td>
+                <td>{{ detection.removal }}</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -123,7 +138,11 @@
 
     <script>
       function exportGeoJSON() {
+        {% if results %}
         const detections = {{ results.detections | tojson }};
+        {% else %}
+        const detections = [];
+        {% endif %}
         fetch('/export_geojson', {
           method: 'POST',
           headers: {

@@ -1,7 +1,7 @@
 from flask import Flask, request, render_template, jsonify, send_file
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ExifTags
 import io
 import json
 from io import BytesIO
@@ -41,13 +41,25 @@ def index():
             error = "No image uploaded. Please choose an image file."
         else:
             file = request.files["image"]
-            # Get geographic coordinates from form
-            lat = float(request.form.get("latitude", 0))
-            lng = float(request.form.get("longitude", 0))
             zoom = int(request.form.get("zoom", 15))
 
             try:
-                image = Image.open(io.BytesIO(file.read())).convert("RGB")
+                image = Image.open(io.BytesIO(file.read()))
+                gps_coords = get_exif_location(image)
+                lat_str = request.form.get("latitude", "").strip()
+                lng_str = request.form.get("longitude", "").strip()
+
+                if gps_coords:
+                    lat, lng = gps_coords
+                    coordinate_source = "image EXIF"
+                elif lat_str and lng_str:
+                    lat = float(lat_str)
+                    lng = float(lng_str)
+                    coordinate_source = "manual input"
+                else:
+                    raise ValueError("Image has no EXIF GPS data. Provide latitude and longitude or upload a GPS-tagged image.")
+
+                image = image.convert("RGB")
                 image_np = np.array(image)
 
                 # Image processing for debris detection
@@ -74,6 +86,7 @@ def index():
 
                         debris_type = classify_debris(area, w, h)
                         debris_type_counts[debris_type] = debris_type_counts.get(debris_type, 0) + 1
+                        debris_removal = get_removal_guidance(debris_type)
 
                         detections.append({
                             "class": "potential_debris",
@@ -82,7 +95,8 @@ def index():
                             "bbox": [x, y, x + w, y + h],
                             "latitude": pixel_lat,
                             "longitude": pixel_lng,
-                            "area": area
+                            "area": area,
+                            "removal": debris_removal
                         })
 
                         detection_coords.append([pixel_lat, pixel_lng])
@@ -103,6 +117,9 @@ def index():
                     "total_detections": len(detections),
                     "detections": detections,
                     "types_found": debris_type_counts,
+                    "removal_guidance": {debris_type: get_removal_guidance(debris_type) for debris_type in debris_type_counts},
+                    "coordinate_source": coordinate_source,
+                    "coordinates_used": {"latitude": lat, "longitude": lng},
                     "map": f"Detected {len(detections)} debris items in area centered at {lat}, {lng}",
                     "actionable_report": f"Detected {len(detections)} potential debris items. {len(priority_zones) if priority_zones else 0} priority zones identified for cleanup.",
                     "heatmap_available": heatmap_html is not None,
@@ -114,17 +131,85 @@ def index():
     return render_template("index.html", results=results, error=error, heatmap_html=heatmap_html, priority_zones=priority_zones)
 
 def classify_debris(area, width, height):
-    """Classify debris into a rough type based on size and shape."""
-    aspect_ratio = width / height if height > 0 else 1
-    if area > 2000 and aspect_ratio > 1.5:
+    """Classify debris into more specific types based on area and shape."""
+    area = float(area)
+    width = float(width)
+    height = float(height)
+    aspect_ratio = width / height if height > 0 else 1.0
+
+    if area > 2500 and 0.8 <= aspect_ratio <= 1.5:
         return "plastic_container"
-    if area > 1500 and aspect_ratio < 0.6:
-        return "fishing_net"
-    if area > 800:
+    if area > 1800 and aspect_ratio > 1.8:
+        return "fishing_net_or_rope"
+    if area > 1500 and aspect_ratio < 0.7:
+        return "fishing_net_or_rope"
+    if area > 1200 and 0.9 <= aspect_ratio <= 1.5:
         return "wood_fragment"
-    if area > 300:
+    if area > 700 and aspect_ratio > 1.3:
+        return "foam_piece"
+    if area > 600 and 0.7 <= aspect_ratio <= 1.2:
+        return "buoy_or_rubber"
+    if area > 400:
         return "plastic_fragment"
     return "general_debris"
+
+
+def get_decimal_from_dms(dms, ref):
+    degrees = dms[0][0] / dms[0][1]
+    minutes = dms[1][0] / dms[1][1]
+    seconds = dms[2][0] / dms[2][1] if len(dms) > 2 else 0
+    coord = degrees + minutes / 60.0 + seconds / 3600.0
+    if ref in ["S", "W"]:
+        coord = -coord
+    return float(coord)
+
+
+def get_exif_location(image):
+    """Extract latitude and longitude from image EXIF GPS metadata."""
+    exif = getattr(image, "_getexif", None)
+    if not exif:
+        return None
+
+    exif_data = exif()
+    if not exif_data:
+        return None
+
+    gps_info = None
+    for tag, value in exif_data.items():
+        decoded = ExifTags.TAGS.get(tag)
+        if decoded == "GPSInfo":
+            gps_info = value
+            break
+
+    if not gps_info:
+        return None
+
+    gps_lat = gps_info.get(2)
+    gps_lat_ref = gps_info.get(1)
+    gps_lng = gps_info.get(4)
+    gps_lng_ref = gps_info.get(3)
+
+    if gps_lat and gps_lat_ref and gps_lng and gps_lng_ref:
+        lat = get_decimal_from_dms(gps_lat, gps_lat_ref)
+        lng = get_decimal_from_dms(gps_lng, gps_lng_ref)
+        return lat, lng
+
+    return None
+
+
+def get_removal_guidance(debris_type):
+    """Return a removal recommendation for each debris type."""
+    guidance = {
+        "plastic_container": "Pick up rigid plastic containers with a net or gloved hand, bag separately, and recycle if possible.",
+        "plastic_fragment": "Collect plastic fragments manually with protective gloves and bag small pieces to prevent spread.",
+        "fishing_net_or_rope": "Use strong gloves and avoid entanglement; remove nets and ropes in sections and dispose or recycle separately.",
+        "wood_fragment": "Gather wood debris carefully, remove any metal hardware, and reuse or dispose according to local rules.",
+        "foam_piece": "Skim foam pieces from the surface with nets or baskets and bag them to stop dispersion.",
+        "buoy_or_rubber": "Retrieve buoyant rubber debris by hand or hook, keep intact, and transport to proper waste handling.",
+        "metal_scrap": "Handle sharp metal debris with thick gloves, secure edges, and send to metal recycling.",
+        "general_debris": "Collect debris manually with protective equipment; prioritize items that threaten wildlife or navigation."
+    }
+    return guidance.get(debris_type, guidance["general_debris"])
 
 
 def generate_heatmap(detection_coords, center_lat, center_lng, zoom):
