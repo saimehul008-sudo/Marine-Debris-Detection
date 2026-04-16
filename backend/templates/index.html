@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Marine Debris Detection</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Marine Debris Detection</h1>
+        <p>Upload aerial or satellite ocean imagery to detect potential debris and generate an actionable report.</p>
+      </header>
+
+      {% if error %}
+      <div class="alert alert-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" enctype="multipart/form-data" class="upload-form">
+        <label for="image">Select image</label>
+        <input type="file" id="image" name="image" accept="image/*" required />
+        <button type="submit">Detect Debris</button>
+      </form>
+
+      {% if results %}
+      <section class="results">
+        <h2>Detection Results</h2>
+        <p><strong>Total Detections:</strong> {{ results.total_detections }}</p>
+        <p><strong>Actionable Report:</strong> {{ results.actionable_report }}</p>
+        <p><strong>Map Summary:</strong> {{ results.map }}</p>
+
+        {% if results.detections %}
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Class</th>
+                <th>Confidence</th>
+                <th>Bounding Box</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for detection in results.detections %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td>{{ detection.class }}</td>
+                <td>{{ "%.2f" | format(detection.confidence) }}</td>
+                <td>{{ detection.bbox }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </section>
+      {% endif %}
+    </div>
+  </body>
+</html>
