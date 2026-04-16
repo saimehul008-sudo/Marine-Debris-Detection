@@ -82,3 +82,18 @@ npm start
 - Heatmap and priority zones require additional Python packages (folium, scikit-learn)
 - The application gracefully degrades if optional packages are not installed
 - Detection algorithm uses OpenCV image processing for blob detection
+
+## Commit change reasons
+
+- Commit 1:
+  A basic framework is made and the basse modal is created
+- Commit 2:
+  A  Concentration heatmap overlaid on geographic coordinates is added
+  Cleanup priority zone rankings with estimated debris density is added
+  GeoJSON export for fleet coordination tools is added
+- Commit 3:
+  More types of debris added
+- Commit 4:
+  (pranavbiju12345-commits <pranavbiju12345-commits@users.noreply.github.com>)
+  We added more specific debris type and tips to resolve them
+      
