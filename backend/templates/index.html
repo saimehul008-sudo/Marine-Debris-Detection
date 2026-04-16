@@ -24,18 +24,6 @@
         </div>
 
         <div class="form-row">
-          <div class="form-group">
-            <label for="latitude">Latitude</label>
-            <input type="number" id="latitude" name="latitude" step="0.000001" placeholder="e.g., 37.7749 (optional if image has GPS)" />
-          </div>
-          <div class="form-group">
-            <label for="longitude">Longitude</label>
-            <input type="number" id="longitude" name="longitude" step="0.000001" placeholder="e.g., -122.4194 (optional if image has GPS)" />
-          </div>
-          <div class="form-group">
-            <label for="zoom">Map Zoom Level</label>
-            <input type="number" id="zoom" name="zoom" value="15" min="1" max="20" />
-          </div>
         </div>
 
         <button type="submit">Detect Debris</button>
@@ -44,11 +32,11 @@
       {% if results %}
       <section class="results">
         <h2>Detection Results</h2>
+
+        {% if results.message %}
+        <div class="alert alert-success">{{ results.message }}</div>
+        {% else %}
         <p><strong>Total Detections:</strong> {{ results.total_detections }}</p>
-        <p><strong>Actionable Report:</strong> {{ results.actionable_report }}</p>
-        <p><strong>Map Summary:</strong> {{ results.map }}</p>
-        <p><strong>Coordinates Source:</strong> {{ results.coordinate_source.replace('_', ' ') }}</p>
-        <p><strong>Coordinates Used:</strong> {{ "%.6f"|format(results.coordinates_used.latitude) }}, {{ "%.6f"|format(results.coordinates_used.longitude) }}</p>
         {% if results.types_found %}
         <p><strong>Debris Types Found:</strong>
           {% for debris_type, count in results.types_found.items() %}
@@ -68,38 +56,6 @@
         </section>
         {% endif %}
 
-        {% if results.heatmap_available %}
-        <div class="export-section">
-          <button onclick="exportGeoJSON()" class="export-btn">Export as GeoJSON</button>
-        </div>
-        {% endif %}
-
-        {% if heatmap_html %}
-        <section class="heatmap-section">
-          <h3>Debris Concentration Heatmap</h3>
-          <div class="map-container">
-            {{ heatmap_html|safe }}
-          </div>
-        </section>
-        {% endif %}
-
-        {% if priority_zones %}
-        <section class="priority-zones">
-          <h3>Cleanup Priority Zones</h3>
-          <div class="zones-grid">
-            {% for zone in priority_zones %}
-            <div class="zone-card priority-{{ 'high' if zone.priority_score > 5 else 'medium' if zone.priority_score > 2 else 'low' }}">
-              <h4>{{ zone.zone_id }}</h4>
-              <p><strong>Center:</strong> {{ "%.6f"|format(zone.center_lat) }}, {{ "%.6f"|format(zone.center_lng) }}</p>
-              <p><strong>Density:</strong> {{ zone.density }} detections</p>
-              <p><strong>Priority Score:</strong> {{ "%.1f"|format(zone.priority_score) }}</p>
-              <p><strong>Bounds:</strong> {{ "%.6f"|format(zone.bounds[0]) }} to {{ "%.6f"|format(zone.bounds[2]) }} lat, {{ "%.6f"|format(zone.bounds[1]) }} to {{ "%.6f"|format(zone.bounds[3]) }} lng</p>
-            </div>
-            {% endfor %}
-          </div>
-        </section>
-        {% endif %}
-
         {% if results.detections %}
         <div class="table-wrapper">
           <table>
@@ -110,8 +66,6 @@
                 <th>Type</th>
                 <th>Confidence</th>
                 <th>Bounding Box</th>
-                <th>Latitude</th>
-                <th>Longitude</th>
                 <th>Removal Tip</th>
               </tr>
             </thead>
@@ -123,8 +77,6 @@
                 <td>{{ detection.type.replace('_', ' ') if detection.type else 'unknown' }}</td>
                 <td>{{ "%.2f" | format(detection.confidence) }}</td>
                 <td>{{ detection.bbox }}</td>
-                <td>{{ "%.6f" | format(detection.latitude) }}</td>
-                <td>{{ "%.6f" | format(detection.longitude) }}</td>
                 <td>{{ detection.removal }}</td>
               </tr>
               {% endfor %}
@@ -132,40 +84,10 @@
           </table>
         </div>
         {% endif %}
+        {% endif %}
       </section>
       {% endif %}
     </div>
 
-    <script>
-      function exportGeoJSON() {
-        {% if results %}
-        const detections = {{ results.detections | tojson }};
-        {% else %}
-        const detections = [];
-        {% endif %}
-        fetch('/export_geojson', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ detections: detections })
-        })
-        .then(response => response.blob())
-        .then(blob => {
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.style.display = 'none';
-          a.href = url;
-          a.download = 'marine_debris_detections.geojson';
-          document.body.appendChild(a);
-          a.click();
-          window.URL.revokeObjectURL(url);
-        })
-        .catch(error => {
-          console.error('Error exporting GeoJSON:', error);
-          alert('Error exporting GeoJSON. Please try again.');
-        });
-      }
-    </script>
   </body>
 </html>
