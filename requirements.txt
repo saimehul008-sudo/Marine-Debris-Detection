@@ -2,3 +2,9 @@ flask
 opencv-python
 pillow
 numpy
+folium
+geopy
+scikit-learn
+geojson
+matplotlib
+seaborn
