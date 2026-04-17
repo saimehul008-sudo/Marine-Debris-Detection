@@ -40,9 +40,31 @@
         {% if results.types_found %}
         <p><strong>Debris Types Found:</strong>
           {% for debris_type, count in results.types_found.items() %}
-            {{ debris_type.replace('_', ' ') }} ({{ count }}){% if not loop.last %}, {% endif %}
+            {{ results.detected_types[debris_type] if results.detected_types and debris_type in results.detected_types else debris_type.replace('_', ' ') }} ({{ count }}){% if not loop.last %}, {% endif %}
           {% endfor %}
         </p>
+        {% endif %}
+
+        {% if results.detected_types %}
+        <section class="detected-types">
+          <h3>Detected Debris Categories</h3>
+          <ul>
+            {% for debris_type, label in results.detected_types.items() %}
+            <li>{{ label }}</li>
+            {% endfor %}
+          </ul>
+        </section>
+        {% endif %}
+
+        {% if results.supported_types %}
+        <section class="supported-types">
+          <h3>Supported Debris Categories</h3>
+          <ul>
+            {% for debris_type, label in results.supported_types.items() %}
+            <li>{{ label }}</li>
+            {% endfor %}
+          </ul>
+        </section>
         {% endif %}
 
         {% if results.removal_guidance %}
@@ -50,7 +72,7 @@
           <h3>Removal Solutions</h3>
           <ul>
             {% for debris_type, guidance in results.removal_guidance.items() %}
-            <li><strong>{{ debris_type.replace('_', ' ') }}:</strong> {{ guidance }}</li>
+            <li><strong>{{ results.supported_types[debris_type] if debris_type in results.supported_types else debris_type.replace('_', ' ') }}:</strong> {{ guidance }}</li>
             {% endfor %}
           </ul>
         </section>
@@ -74,7 +96,7 @@
               <tr>
                 <td>{{ loop.index }}</td>
                 <td>{{ detection.class }}</td>
-                <td>{{ detection.type.replace('_', ' ') if detection.type else 'unknown' }}</td>
+                <td>{{ detection.type_label if detection.type_label else (detection.type.replace('_', ' ') if detection.type else 'unknown') }}</td>
                 <td>{{ "%.2f" | format(detection.confidence) }}</td>
                 <td>{{ detection.bbox }}</td>
                 <td>{{ detection.removal }}</td>

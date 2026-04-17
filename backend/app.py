@@ -16,12 +16,16 @@ try:
 except ImportError:
     SKLEARN_AVAILABLE = False
 
-try:
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
+DEBRIS_TYPE_LABELS = {
+    "plastic_container": "Plastic Container",
+    "plastic_fragment": "Plastic Fragment",
+    "fishing_net_or_rope": "Fishing Net / Rope",
+    "wood_fragment": "Wood Fragment",
+    "foam_piece": "Foam Piece",
+    "buoy_or_rubber": "Buoy / Rubber",
+    "metal_scrap": "Metal Scrap",
+    "general_debris": "General Debris"
+}
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 
@@ -29,8 +33,6 @@ app = Flask(__name__, template_folder="templates", static_folder="static")
 def index():
     results = None
     error = None
-    heatmap_html = None
-    priority_zones = None
 
     if request.method == "POST":
         if "image" not in request.files:
@@ -43,57 +45,77 @@ def index():
                 image = image.convert("RGB")
                 image_np = np.array(image)
 
-                # Enhanced image processing for precise debris detection
+                # Enhanced image preprocessing for accurate debris detection
                 gray = cv2.cvtColor(image_np, cv2.COLOR_RGB2GRAY)
 
-                # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) for better contrast
+                # Enhanced preprocessing for marine debris detection
+                # Apply CLAHE for better contrast in marine environments
                 clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
                 gray = clahe.apply(gray)
 
-                # Multi-scale edge detection using Canny
-                edges1 = cv2.Canny(gray, 50, 150)  # Fine edges
-                edges2 = cv2.Canny(gray, 30, 100)  # Coarse edges
-                edges = cv2.bitwise_or(edges1, edges2)  # Combine edge detections
+                # Advanced noise reduction with multiple filters
+                gray = cv2.bilateralFilter(gray, 9, 75, 75)
+                gray = cv2.medianBlur(gray, 3)  # Additional noise reduction
 
-                # Fill edges to create regions
+                # Multi-scale edge detection with improved parameters and hysteresis
+                edges1 = cv2.Canny(gray, 25, 75)   # Fine edges
+                edges2 = cv2.Canny(gray, 40, 120)  # Medium edges
+                edges3 = cv2.Canny(gray, 60, 180)  # Strong edges
+                edges = cv2.bitwise_or(edges1, edges2)
+                edges = cv2.bitwise_or(edges, edges3)
+
+                # Enhanced morphological operations for debris region formation
                 kernel_fill = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
                 filled = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel_fill, iterations=2)
+                filled = cv2.morphologyEx(filled, cv2.MORPH_OPEN, kernel_fill, iterations=1)
 
-                # Multiple threshold approaches with different sensitivities
+                # Advanced thresholding with multiple techniques
                 blur_fine = cv2.GaussianBlur(gray, (3, 3), 0)
-                blur_coarse = cv2.GaussianBlur(gray, (7, 7), 0)
+                blur_medium = cv2.GaussianBlur(gray, (5, 5), 0)
+                blur_coarse = cv2.GaussianBlur(gray, (9, 9), 0)
 
-                # Otsu's thresholding on different scales
+                # Otsu's thresholding with different scales
                 _, thresh_otsu_fine = cv2.threshold(blur_fine, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+                _, thresh_otsu_medium = cv2.threshold(blur_medium, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
                 _, thresh_otsu_coarse = cv2.threshold(blur_coarse, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-                # Adaptive thresholding with different parameters
+                # Adaptive thresholding with optimized parameters
                 thresh_adaptive1 = cv2.adaptiveThreshold(blur_fine, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                                        cv2.THRESH_BINARY_INV, 11, 3)
-                thresh_adaptive2 = cv2.adaptiveThreshold(blur_coarse, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                                       cv2.THRESH_BINARY_INV, 21, 5)
+                thresh_adaptive2 = cv2.adaptiveThreshold(blur_medium, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                       cv2.THRESH_BINARY_INV, 21, 6)
+                thresh_adaptive3 = cv2.adaptiveThreshold(blur_coarse, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                       cv2.THRESH_BINARY_INV, 31, 9)
 
-                # Combine all thresholding results
-                thresh_combined = cv2.bitwise_or(thresh_otsu_fine, thresh_otsu_coarse)
+                # Combine all thresholding results with weighted approach
+                thresh_combined = cv2.bitwise_or(thresh_otsu_fine, thresh_otsu_medium)
+                thresh_combined = cv2.bitwise_or(thresh_combined, thresh_otsu_coarse)
                 thresh_combined = cv2.bitwise_or(thresh_combined, thresh_adaptive1)
                 thresh_combined = cv2.bitwise_or(thresh_combined, thresh_adaptive2)
+                thresh_combined = cv2.bitwise_or(thresh_combined, thresh_adaptive3)
                 thresh_combined = cv2.bitwise_or(thresh_combined, filled)
 
-                # Advanced morphological operations for precise cleaning
+                # Advanced morphological operations for precise debris extraction
                 kernel_clean = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
                 thresh = cv2.morphologyEx(thresh_combined, cv2.MORPH_OPEN, kernel_clean, iterations=1)
                 thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel_clean, iterations=1)
 
-                # Remove small noise with area opening
+                # Remove small noise with optimized area filtering and shape analysis
                 contours_noise, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
                 thresh_clean = np.zeros_like(thresh)
                 for cnt in contours_noise:
-                    if cv2.contourArea(cnt) > 50:  # Filter small noise
-                        cv2.drawContours(thresh_clean, [cnt], -1, 255, -1)
+                    area_noise = cv2.contourArea(cnt)
+                    if area_noise > 150:  # Higher threshold for better accuracy
+                        # Additional shape filtering for noise removal
+                        perimeter = cv2.arcLength(cnt, True)
+                        if perimeter > 0:
+                            circularity_noise = 4 * np.pi * area_noise / (perimeter * perimeter)
+                            if circularity_noise < 0.95:  # Avoid perfect circles (likely artifacts)
+                                cv2.drawContours(thresh_clean, [cnt], -1, 255, -1)
 
                 thresh = thresh_clean
 
-                # Find contours with high precision
+                # Find contours with high precision approximation
                 contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_TC89_L1)
 
                 detections = []
@@ -117,6 +139,7 @@ def index():
                             detections.append({
                                 "class": "marine_debris",
                                 "type": debris_type,
+                                "type_label": DEBRIS_TYPE_LABELS.get(debris_type, debris_type.replace('_', ' ').title()),
                                 "confidence": confidence,
                                 "bbox": [x, y, x + w, y + h],
                                 "area": properties['area'],
@@ -147,23 +170,6 @@ def index():
                     debris_type = detection['type']
                     debris_type_counts[debris_type] = debris_type_counts.get(debris_type, 0) + 1
 
-                # Generate image-based heatmap
-                pixel_coords = [(x + w/2, y + h/2) for x, y, w, h in [d["bbox"] for d in detections]]
-                heatmap_image = None
-                if pixel_coords and MATPLOTLIB_AVAILABLE and len(detections) > 0:
-                    plt.figure(figsize=(10, 8))
-                    plt.imshow(cv2.cvtColor(image_np, cv2.COLOR_BGR2RGB))
-                    if len(pixel_coords) > 1:
-                        sns.kdeplot(x=[p[0] for p in pixel_coords], y=[p[1] for p in pixel_coords], cmap="Reds", fill=True, alpha=0.5, levels=10)
-                    else:
-                        plt.scatter([p[0] for p in pixel_coords], [p[1] for p in pixel_coords], c='red', s=50, alpha=0.7)
-                    plt.axis('off')
-                    buf = BytesIO()
-                    plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
-                    buf.seek(0)
-                    heatmap_image = base64.b64encode(buf.read()).decode('utf-8')
-                    plt.close()
-
                 # Prepare final results
                 if len(detections) == 0:
                     results = {
@@ -171,17 +177,22 @@ def index():
                         "detections": [],
                         "types_found": {},
                         "removal_guidance": {},
-                        "heatmap_image": None,
                         "message": "No debris detected - clean water body"
                     }
                 else:
+                    detected_types = {
+                        debris_type: DEBRIS_TYPE_LABELS.get(debris_type, debris_type.replace('_', ' ').title())
+                        for debris_type in debris_type_counts
+                    }
                     results = {
                         "total_detections": len(detections),
                         "detections": detections,
                         "types_found": debris_type_counts,
-                        "removal_guidance": {debris_type: get_removal_guidance(debris_type) for debris_type in debris_type_counts},
-                        "heatmap_image": heatmap_image
+                        "detected_types": detected_types,
+                        "removal_guidance": {debris_type: get_removal_guidance(debris_type) for debris_type in debris_type_counts}
                     }
+
+                results["supported_types"] = DEBRIS_TYPE_LABELS
             except Exception as exc:
                 error = f"Unable to process the image: {exc}"
 
@@ -198,7 +209,7 @@ def analyze_contour_properties(contour, image):
     aspect_ratio = float(w) / h if h > 0 else 1.0
 
     # Skip contours that are too small or have extreme aspect ratios
-    if w < 15 or h < 15 or aspect_ratio > 4.0 or aspect_ratio < 0.25:
+    if w < 8 or h < 8 or aspect_ratio > 6.0 or aspect_ratio < 0.15:
         return None
 
     # Advanced shape properties
@@ -213,6 +224,10 @@ def analyze_contour_properties(contour, image):
     hull = cv2.convexHull(contour)
     hull_area = cv2.contourArea(hull)
     solidity = area / hull_area if hull_area > 0 else 0
+
+    # Skip contours with very low solidity (likely fragmented water patterns)
+    if solidity < 0.6:
+        return None
 
     # Shape moments for advanced analysis
     moments = cv2.moments(contour)
@@ -236,7 +251,7 @@ def analyze_contour_properties(contour, image):
     else:
         eccentricity = 0
 
-    # Color analysis with multiple regions
+    # Enhanced color analysis with multiple regions
     roi = image[y:y+h, x:x+w]
     if roi.size > 0:
         # Full ROI color
@@ -244,51 +259,85 @@ def analyze_contour_properties(contour, image):
         hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
         avg_hsv = cv2.mean(hsv_roi)[:3]
 
-        # Center region color (more representative of object)
-        center_size = min(w, h) // 3
-        if center_size > 5:
-            cx_int, cy_int = int(cx - x), int(cy - y)
-            x1 = max(0, cx_int - center_size)
-            y1 = max(0, cy_int - center_size)
-            x2 = min(w, cx_int + center_size)
-            y2 = min(h, cy_int + center_size)
+        # Center region color (more representative of object core)
+        center_size = max(6, min(w, h) // 4)  # Larger center region for better analysis
+        cx_int, cy_int = int(cx - x), int(cy - y)
+        x1 = max(0, cx_int - center_size)
+        y1 = max(0, cy_int - center_size)
+        x2 = min(w, cx_int + center_size)
+        y2 = min(h, cy_int + center_size)
 
-            if x2 > x1 and y2 > y1:
-                center_roi = roi[y1:y2, x1:x2]
-                if center_roi.size > 0:
-                    center_color = cv2.mean(center_roi)[:3]
-                    center_hsv_roi = cv2.cvtColor(center_roi, cv2.COLOR_BGR2HSV)
-                    center_hsv = cv2.mean(center_hsv_roi)[:3]
-                else:
-                    center_color = avg_color
-                    center_hsv = avg_hsv
+        if x2 > x1 and y2 > y1:
+            center_roi = roi[y1:y2, x1:x2]
+            if center_roi.size > 0:
+                center_color = cv2.mean(center_roi)[:3]
+                center_hsv_roi = cv2.cvtColor(center_roi, cv2.COLOR_BGR2HSV)
+                center_hsv = cv2.mean(center_hsv_roi)[:3]
             else:
                 center_color = avg_color
                 center_hsv = avg_hsv
         else:
             center_color = avg_color
             center_hsv = avg_hsv
+
+        # Calculate color variance for texture analysis
+        gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        brightness_std = np.std(gray_roi)
+        hsv_std = np.std(hsv_roi.reshape(-1, 3), axis=0)
+
+        # Edge sharpness analysis (gradient magnitude)
+        sobelx = cv2.Sobel(gray_roi, cv2.CV_64F, 1, 0, ksize=3)
+        sobely = cv2.Sobel(gray_roi, cv2.CV_64F, 0, 1, ksize=3)
+        gradient_magnitude = np.sqrt(sobelx**2 + sobely**2)
+        edge_sharpness = np.mean(gradient_magnitude)
+
+        # Color histogram analysis for debris characteristics
+        hist_h = cv2.calcHist([hsv_roi], [0], None, [180], [0, 180])
+        hist_s = cv2.calcHist([hsv_roi], [1], None, [256], [0, 256])
+        hist_v = cv2.calcHist([hsv_roi], [2], None, [256], [0, 256])
+
+        # Normalize histograms
+        hist_h = hist_h / hist_h.sum() if hist_h.sum() > 0 else hist_h
+        hist_s = hist_s / hist_s.sum() if hist_s.sum() > 0 else hist_s
+        hist_v = hist_v / hist_v.sum() if hist_v.sum() > 0 else hist_v
+
+        # Calculate entropy for texture complexity
+        entropy_h = -np.sum(hist_h * np.log2(hist_h + 1e-10))
+        entropy_s = -np.sum(hist_s * np.log2(hist_s + 1e-10))
+        entropy_v = -np.sum(hist_v * np.log2(hist_v + 1e-10))
     else:
         avg_color = (0, 0, 0)
         avg_hsv = (0, 0, 0)
         center_color = (0, 0, 0)
         center_hsv = (0, 0, 0)
+        brightness_std = 0
+        hsv_std = np.array([0, 0, 0])
+        edge_sharpness = 0
+        entropy_h = entropy_s = entropy_v = 0
 
-    # Strict color filtering for water-like features
+    # Strict color filtering for water-like features with improved logic
     hue, saturation, value = avg_hsv
     center_hue, center_sat, center_val = center_hsv
 
-    # Reject water-like colors (blue with low saturation)
-    if ((90 <= hue <= 150 and saturation < 25) or
-        (90 <= center_hue <= 150 and center_sat < 25)):
+    # Reject water-like colors (blue/cyan with low saturation and uniformity)
+    if ((90 <= hue <= 150 and saturation < 35 and brightness_std < 18) or
+        (90 <= center_hue <= 150 and center_sat < 35 and hsv_std[1] < 12)):
         return None
 
-    # Reject over/under exposed areas
-    if value < 40 or value > 220 or center_val < 40 or center_val > 220:
+    # Reject over/under exposed areas (but allow some range for debris)
+    if ((value < 40 or value > 220) and (center_val < 40 or center_val > 220)):
         return None
 
-    # Reject desaturated areas
-    if saturation < 15 or center_sat < 15:
+    # Reject very desaturated uniform regions (water, sky, reflections)
+    if saturation < 15 and center_sat < 15 and hsv_std[1] < 10:
+        return None
+
+    # Additional texture-based filtering with edge sharpness
+    if brightness_std < 15 and hsv_std[1] < 10 and edge_sharpness < 20:
+        return None
+
+    # Reject contours with too low entropy (uniform regions)
+    if entropy_h < 2.0 and entropy_s < 2.0 and entropy_v < 2.0:
         return None
 
     return {
@@ -304,6 +353,13 @@ def analyze_contour_properties(contour, image):
         'avg_hsv': avg_hsv,
         'center_color': center_color,
         'center_hsv': center_hsv,
+        'brightness_std': brightness_std,
+        'saturation_std': hsv_std[1],
+        'value_std': hsv_std[2],
+        'edge_sharpness': edge_sharpness,
+        'entropy_h': entropy_h,
+        'entropy_s': entropy_s,
+        'entropy_v': entropy_v,
         'perimeter': perimeter,
         'bbox': (x, y, w, h),
         'centroid': (cx, cy)
@@ -319,71 +375,99 @@ def classify_debris(properties):
     circularity = properties['circularity']
     solidity = properties['solidity']
     eccentricity = properties['eccentricity']
-    avg_hsv = properties['avg_hsv']
     center_hsv = properties['center_hsv']
+    brightness_std = properties.get('brightness_std', 0)
+    saturation_std = properties.get('saturation_std', 0)
+    edge_sharpness = properties.get('edge_sharpness', 0)
+    entropy_h = properties.get('entropy_h', 0)
+    entropy_s = properties.get('entropy_s', 0)
+    entropy_v = properties.get('entropy_v', 0)
 
     # Use center color for more accurate classification
     hue, saturation, value = center_hsv
 
-    # Size-based pre-classification
-    if area < 500:
+    # Size-based pre-classification with refined thresholds
+    if area < 400:
         size_category = "small"
-    elif area < 1500:
+    elif area < 1200:
         size_category = "medium"
     else:
         size_category = "large"
 
-    # Plastic containers: rectangular, solid, medium to large
+    # Plastic containers: rectangular, solid, medium to large with enhanced criteria
     if (size_category in ["medium", "large"] and
-        0.6 <= aspect_ratio <= 1.6 and
-        solidity > 0.75 and
-        circularity < 0.7 and
-        eccentricity < 0.7 and
-        saturation > 20):
+        0.65 <= aspect_ratio <= 1.5 and
+        solidity > 0.78 and
+        circularity < 0.65 and
+        eccentricity < 0.65 and
+        saturation > 25 and
+        brightness_std > 15 and
+        edge_sharpness > 25 and  # Sharp edges for plastic
+        entropy_s > 3.0):  # Color complexity
         return "plastic_container"
 
-    # Fishing gear: long/thin or tangled shapes
-    if ((aspect_ratio > 2.5 and solidity > 0.4) or  # Long and thin
-        (aspect_ratio < 0.4 and solidity < 0.7) or  # Very wide
-        (solidity < 0.5 and eccentricity > 0.8)):   # Tangled/irregular
-        return "fishing_net_or_rope"
+    # Fishing gear: long/thin or tangled shapes with improved detection
+    if ((aspect_ratio > 2.8 and solidity > 0.45) or  # Long and thin
+        (aspect_ratio < 0.35 and solidity < 0.75) or  # Very wide
+        (solidity < 0.55 and eccentricity > 0.75) or  # Tangled/irregular
+        (circularity < 0.5 and saturation_std > 20)):   # Textured irregular shapes
+        if edge_sharpness > 20 and entropy_h > 2.5:  # Has defined edges and color variation
+            return "fishing_net_or_rope"
 
-    # Wood fragments: brown tones, irregular shapes, medium solidity
+    # Wood fragments: brown tones, irregular shapes with enhanced color detection
     if (size_category in ["medium", "large"] and
-        0.5 <= aspect_ratio <= 2.0 and
-        solidity > 0.6 and
-        circularity < 0.75 and
-        5 <= hue <= 45 and saturation < 70):  # Brown hue range
+        0.45 <= aspect_ratio <= 2.2 and
+        solidity > 0.65 and
+        circularity < 0.7 and
+        8 <= hue <= 45 and saturation < 65 and  # Brown hue range
+        brightness_std > 20 and
+        edge_sharpness > 30 and  # Wood has distinct edges
+        entropy_v > 3.5):  # Brightness variation in wood
         return "wood_fragment"
 
-    # Foam pieces: light colors, often rectangular or irregular
-    if (aspect_ratio > 1.5 and
-        value > 160 and saturation < 40 and
-        solidity > 0.5):
+    # Foam pieces: light colors, often rectangular with enhanced criteria
+    if (aspect_ratio > 1.6 and
+        value > 165 and saturation < 35 and
+        solidity > 0.55 and
+        circularity < 0.75 and
+        brightness_std > 10 and
+        edge_sharpness > 15 and
+        entropy_s < 2.5):  # Low saturation entropy for foam
         return "foam_piece"
 
-    # Buoys or rubber: circular/oval, high solidity, buoyant
-    if (0.7 <= aspect_ratio <= 1.4 and
-        circularity > 0.5 and
-        solidity > 0.8 and
-        eccentricity < 0.6):
+    # Buoys or rubber: circular/oval, high solidity with enhanced shape detection
+    if (0.75 <= aspect_ratio <= 1.35 and
+        circularity > 0.55 and
+        solidity > 0.82 and
+        eccentricity < 0.55 and
+        saturation > 20 and
+        brightness_std > 12 and
+        edge_sharpness > 18):
         return "buoy_or_rubber"
 
-    # Metal scrap: high contrast, sharp edges, reflective
-    if (solidity > 0.85 and
-        saturation > 50 and
-        value > 130 and
-        circularity < 0.7):
+    # Metal scrap: high contrast, sharp edges with enhanced detection
+    if (solidity > 0.87 and
+        saturation > 55 and
+        value > 135 and
+        circularity < 0.65 and
+        brightness_std > 25 and
+        edge_sharpness > 35 and  # Very sharp edges for metal
+        entropy_v > 4.0):  # High brightness variation
         return "metal_scrap"
 
-    # Plastic fragments: various shapes, bright colors, small to medium
+    # Plastic fragments: various shapes, bright colors with enhanced criteria
     if (size_category in ["small", "medium"] and
-        saturation > 25 and value > 90 and
-        solidity > 0.5):
+        saturation > 28 and value > 95 and
+        solidity > 0.55 and
+        brightness_std > 12 and
+        edge_sharpness > 20 and
+        entropy_s > 2.8):  # Color complexity for plastic
         return "plastic_fragment"
 
-    # General debris: fallback for unclassified items
-    if area > 200 and solidity > 0.4:
+    # General debris: fallback for unclassified items with stricter criteria
+    if (area > 180 and solidity > 0.45 and brightness_std > 8 and
+        edge_sharpness > 15 and
+        (entropy_h > 2.2 or entropy_s > 2.2 or entropy_v > 2.2)):
         return "general_debris"
 
     return "unknown"
@@ -391,7 +475,7 @@ def classify_debris(properties):
 
 def calculate_confidence(properties, debris_type):
     """Calculate confidence score based on advanced property analysis."""
-    base_confidence = 0.65  # Higher base confidence with better analysis
+    base_confidence = 0.75  # Higher base confidence with enhanced analysis
 
     area = properties['area']
     aspect_ratio = properties['aspect_ratio']
@@ -399,67 +483,105 @@ def calculate_confidence(properties, debris_type):
     solidity = properties['solidity']
     eccentricity = properties['eccentricity']
     center_hsv = properties['center_hsv']
+    brightness_std = properties.get('brightness_std', 0)
+    saturation_std = properties.get('saturation_std', 0)
+    edge_sharpness = properties.get('edge_sharpness', 0)
+    entropy_h = properties.get('entropy_h', 0)
+    entropy_s = properties.get('entropy_s', 0)
+    entropy_v = properties.get('entropy_v', 0)
 
     hue, saturation, value = center_hsv
 
     # Size-based confidence adjustments
     if debris_type == "plastic_container":
-        if 0.7 <= aspect_ratio <= 1.3 and solidity > 0.8:
+        if 0.7 <= aspect_ratio <= 1.4 and solidity > 0.8:
             base_confidence += 0.15
         if circularity < 0.6 and eccentricity < 0.6:
-            base_confidence += 0.1
-        if saturation > 25:
+            base_confidence += 0.06
+        if saturation > 28 and brightness_std > 20:
             base_confidence += 0.05
+        if edge_sharpness > 30 and entropy_s > 3.5:
+            base_confidence += 0.08  # Strong edge and color complexity match
 
     elif debris_type == "fishing_net_or_rope":
-        if aspect_ratio > 2.0 or aspect_ratio < 0.5:
-            base_confidence += 0.15
-        if solidity < 0.7 and eccentricity > 0.7:
-            base_confidence += 0.1
-        if circularity < 0.6:
-            base_confidence += 0.05
+        if aspect_ratio > 2.5 or aspect_ratio < 0.4:
+            base_confidence += 0.14
+        if solidity < 0.7 and eccentricity > 0.75:
+            base_confidence += 0.10
+        if circularity < 0.55 and saturation_std > 15:
+            base_confidence += 0.06
+        if edge_sharpness > 25 and entropy_h > 3.0:
+            base_confidence += 0.07
 
     elif debris_type == "wood_fragment":
-        if 0.6 <= aspect_ratio <= 1.8 and solidity > 0.65:
-            base_confidence += 0.15
-        if 8 <= hue <= 42 and saturation < 75:
-            base_confidence += 0.15  # Strong color match
-        if circularity < 0.7:
+        if 0.6 <= aspect_ratio <= 1.9 and solidity > 0.68:
+            base_confidence += 0.14
+        if 10 <= hue <= 42 and saturation < 70:
+            base_confidence += 0.16  # Strong color match
+        if circularity < 0.7 and brightness_std > 25:
             base_confidence += 0.05
+        if edge_sharpness > 35 and entropy_v > 4.0:
+            base_confidence += 0.08
 
     elif debris_type == "buoy_or_rubber":
-        if 0.75 <= aspect_ratio <= 1.25:
-            base_confidence += 0.15
-        if circularity > 0.55 and solidity > 0.8:
-            base_confidence += 0.1
-        if eccentricity < 0.5:
-            base_confidence += 0.1
+        if 0.78 <= aspect_ratio <= 1.25:
+            base_confidence += 0.14
+        if circularity > 0.58 and solidity > 0.82:
+            base_confidence += 0.10
+        if eccentricity < 0.5 and saturation > 25:
+            base_confidence += 0.06
+        if edge_sharpness > 20 and entropy_s > 2.5:
+            base_confidence += 0.07
 
     elif debris_type == "foam_piece":
-        if value > 170 and saturation < 35:
-            base_confidence += 0.2  # Strong color match
-        if aspect_ratio > 1.3:
-            base_confidence += 0.1
+        if value > 175 and saturation < 32:
+            base_confidence += 0.20  # Strong color match
+        if aspect_ratio > 1.4 and brightness_std > 15:
+            base_confidence += 0.06
+        if edge_sharpness > 18 and entropy_s < 2.8:
+            base_confidence += 0.08
 
     elif debris_type == "metal_scrap":
-        if solidity > 0.87 and saturation > 55:
-            base_confidence += 0.15
-        if value > 135 and circularity < 0.75:
-            base_confidence += 0.1
+        if solidity > 0.88 and saturation > 58:
+            base_confidence += 0.16
+        if value > 140 and circularity < 0.65:
+            base_confidence += 0.08
+        if brightness_std > 30:
+            base_confidence += 0.05
+        if edge_sharpness > 40 and entropy_v > 4.5:
+            base_confidence += 0.10  # Very strong metal characteristics
 
     elif debris_type == "plastic_fragment":
-        if 200 <= area <= 1800:
-            base_confidence += 0.1
-        if saturation > 30 and value > 95:
-            base_confidence += 0.1
+        if 220 <= area <= 1600:
+            base_confidence += 0.10
+        if saturation > 32 and value > 100:
+            base_confidence += 0.08
+        if brightness_std > 18:
+            base_confidence += 0.05
+        if edge_sharpness > 25 and entropy_s > 3.2:
+            base_confidence += 0.07
 
-    # General quality adjustments
-    if solidity > 0.8:
+    elif debris_type == "general_debris":
+        if area > 250 and solidity > 0.5:
+            base_confidence += 0.06
+        if brightness_std > 15:
+            base_confidence += 0.04
+        if edge_sharpness > 18 and (entropy_h > 2.5 or entropy_s > 2.5 or entropy_v > 2.5):
+            base_confidence += 0.08
+
+    # Advanced quality adjustments based on all new features
+    if solidity > 0.82:
+        base_confidence += 0.03
+    if saturation > 25:
         base_confidence += 0.02
-    if saturation > 20:
+    if brightness_std > 20:
+        base_confidence += 0.02
+    if edge_sharpness > 25:
+        base_confidence += 0.03
+    if entropy_h > 3.0 or entropy_s > 3.0 or entropy_v > 3.0:
         base_confidence += 0.02
 
-    return min(base_confidence, 0.95)  # Cap at 95%
+    return min(base_confidence, 0.98)  # Cap at 98%
     degrees = dms[0][0] / dms[0][1]
     minutes = dms[1][0] / dms[1][1]
     seconds = dms[2][0] / dms[2][1] if len(dms) > 2 else 0
